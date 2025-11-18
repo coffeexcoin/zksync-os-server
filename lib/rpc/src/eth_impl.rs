@@ -1,8 +1,6 @@
 use crate::config::RpcConfig;
 use crate::eth_call_handler::EthCallHandler;
-use crate::result::{
-    ToRpcResult, internal_rpc_err, rpc_err, rpc_error_with_code, unimplemented_rpc_err,
-};
+use crate::result::{ToRpcResult, internal_rpc_err, rpc_error_with_code, unimplemented_rpc_err};
 use crate::rpc_storage::{ReadRpcStorage, RpcStorageError};
 use crate::tx_handler::TxHandler;
 use alloy::consensus::Account;
@@ -701,24 +699,21 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthApiServer
         max_wait_ms: Option<U256>,
     ) -> RpcResult<ZkTransactionReceipt> {
         let timeout_duration = if let Some(timeout_ms) = max_wait_ms {
-            let timeout_u64: u64 = timeout_ms.try_into().map_err(|_| {
-                rpc_err(
-                    jsonrpsee::types::error::CALL_EXECUTION_FAILED_CODE,
-                    "invalid timeout",
-                    None,
-                )
-            })?;
-
-            let requested_timeout = Duration::from_millis(timeout_u64);
-            if requested_timeout > self.config.send_raw_transaction_sync_max_timeout {
-                return Err(rpc_err(
-                    jsonrpsee::types::error::CALL_EXECUTION_FAILED_CODE,
-                    "invalid timeout",
-                    None,
-                ));
+            match timeout_ms.try_into() {
+                Ok(timeout_u64) => {
+                    let requested_timeout = Duration::from_millis(timeout_u64);
+                    if requested_timeout > self.config.send_raw_transaction_sync_max_timeout {
+                        // Per EIP-7966 MUST use default timeout if user provided timeout is invalid
+                        self.config.send_raw_transaction_sync_timeout
+                    } else {
+                        requested_timeout
+                    }
+                }
+                Err(_) => {
+                    // Per EIP-7966 MUST use default timeout if user provided timeout is invalid
+                    self.config.send_raw_transaction_sync_timeout
+                }
             }
-
-            requested_timeout
         } else {
             self.config.send_raw_transaction_sync_timeout
         };
