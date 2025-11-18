@@ -277,13 +277,13 @@ pub struct RpcConfig {
     #[config(default, with = Delimited(","))]
     pub l2_signer_blacklist: HashSet<ConfigAddress>,
 
-    /// Timeout for `eth_sendRawTransactionSync` in milliseconds
-    #[config(default_t = 10_000)]
-    pub send_raw_transaction_sync_timeout: u64,
+    /// Default timeout for `eth_sendRawTransactionSync`
+    #[config(default_t = 2 * TimeUnit::Seconds)]
+    pub send_raw_transaction_sync_timeout: Duration,
 
-    /// Poll interval for `eth_sendRawTransactionSync` in milliseconds
-    #[config(default_t = 100)]
-    pub send_raw_transaction_sync_poll_interval: u64,
+    /// Maximum user provided timeout for `eth_sendRawTransactionSync`
+    #[config(default_t = 10 * TimeUnit::Seconds)]
+    pub send_raw_transaction_sync_max_timeout: Duration,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -622,7 +622,7 @@ impl From<RpcConfig> for zksync_os_rpc::RpcConfig {
             l2_signer_blacklist: c.l2_signer_blacklist.into_iter().map(|a| a.0).collect(),
             stale_filter_ttl: c.stale_filter_ttl,
             send_raw_transaction_sync_timeout: c.send_raw_transaction_sync_timeout,
-            send_raw_transaction_sync_poll_interval: c.send_raw_transaction_sync_poll_interval,
+            send_raw_transaction_sync_max_timeout: c.send_raw_transaction_sync_max_timeout,
         }
     }
 }

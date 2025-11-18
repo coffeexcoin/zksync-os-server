@@ -31,11 +31,11 @@ pub struct RpcConfig {
     /// List of L2 signer addresses to blacklist (i.e. their transactions are rejected).
     pub l2_signer_blacklist: HashSet<Address>,
 
-    /// Timeout for `eth_sendRawTransactionSync` in milliseconds
-    pub send_raw_transaction_sync_timeout: u64,
+    /// Default timeout for `eth_sendRawTransactionSync`
+    pub send_raw_transaction_sync_timeout: Duration,
 
-    /// Poll interval for `eth_sendRawTransactionSync` in milliseconds
-    pub send_raw_transaction_sync_poll_interval: u64,
+    /// Maximum user provided timeout for `eth_sendRawTransactionSync`
+    pub send_raw_transaction_sync_max_timeout: Duration,
 }
 
 impl RpcConfig {
