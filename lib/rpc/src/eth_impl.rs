@@ -13,6 +13,7 @@ use alloy::eips::{BlockId, BlockNumberOrTag, Encodable2718};
 use alloy::network::BlockResponse;
 use alloy::network::primitives::BlockTransactions;
 use alloy::primitives::{Address, B256, Bytes, TxHash, U64, U256};
+use alloy::providers::DynProvider;
 use alloy::rpc::types::simulate::{SimulatePayload, SimulatedBlock};
 use alloy::rpc::types::state::StateOverride;
 use alloy::rpc::types::{
@@ -57,11 +58,13 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthNamespace<RpcSto
         eth_call_handler: EthCallHandler<RpcStorage>,
         chain_id: u64,
         acceptance_state: watch::Receiver<TransactionAcceptanceState>,
+        tx_forwarder: Option<DynProvider>,
     ) -> Self {
         let tx_handler = TxHandler::new(
             mempool.clone(),
             acceptance_state,
             config.l2_signer_blacklist.clone(),
+            tx_forwarder,
         );
 
         Self {
