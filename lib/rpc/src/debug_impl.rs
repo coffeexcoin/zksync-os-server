@@ -260,7 +260,7 @@ pub enum DebugError {
     /// Unsupported tracer type
     #[error("tracer {} is not supported", .0.as_str())]
     UnsupportedTracer(GethDebugTracerType),
-    /// Unsupported default tracer
+    /// Tracing with `tx_index` is not supported
     #[error("tracing with tx index is not supported")]
     UnsupportedTxIndex,
     /// When the tracer config does not match the tracer

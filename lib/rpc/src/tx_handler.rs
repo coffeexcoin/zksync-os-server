@@ -157,6 +157,7 @@ pub enum EthSendRawTransactionSyncError {
     /// Regular `eth_sendRawTransaction` errors
     #[error(transparent)]
     Regular(#[from] EthSendRawTransactionError),
+    /// Timeout while waiting for transaction receipt.
     #[error("The transaction was added to the mempool but wasn't processed within {0:?}.")]
     Timeout(Duration),
 }
