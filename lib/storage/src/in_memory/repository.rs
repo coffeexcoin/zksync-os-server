@@ -296,7 +296,10 @@ impl TransactionReceiptRepository {
 
     /// Inserts data for multiple txs. If a data for the same hash
     /// already exists, it will be overwritten.
-    pub fn insert<'a>(&'a self, txs: impl Iterator<Item = (&'a TxHash, &'a Arc<StoredTxData>)>) {
+    pub fn insert<'a>(
+        &'a self,
+        txs: impl IntoIterator<Item = (&'a TxHash, &'a Arc<StoredTxData>)>,
+    ) {
         for (tx_hash, data) in txs {
             let sender = data.tx.signer();
             let nonce = data.tx.nonce();

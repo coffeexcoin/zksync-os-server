@@ -6,6 +6,7 @@ use alloy::primitives::{B256, Bytes, U256};
 use alloy::providers::{DynProvider, Provider};
 use alloy::transports::{RpcError, TransportErrorKind};
 use std::time::Duration;
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::watch;
 use zksync_os_mempool::{L2TransactionPool, PoolError};
 use zksync_os_rpc_api::types::ZkTransactionReceipt;
@@ -109,7 +110,7 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> TxHandler<RpcStorag
             loop {
                 // Wait for the next block notification
                 let Ok(block) = block_rx.recv().await else {
-                    // Channel closed, this shouldn't happen in normal operation
+                    // Channel closed or is lagging, this shouldn't happen in normal operation
                     tracing::warn!("block subscription closed while waiting for tx receipt");
                     return Err(EthSendRawTransactionSyncError::Timeout(timeout_duration));
                 };
