@@ -107,23 +107,20 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> TxHandler<RpcStorag
         // Wait for the transaction to appear in a block or timeout
         tokio::time::timeout(timeout_duration, async {
             loop {
-                // check
-                if let Ok(Some(stored_tx)) =
-                    self.storage.repository().get_stored_transaction(tx_hash)
-                {
-                    return Ok(build_api_receipt(
-                        tx_hash,
-                        stored_tx.receipt,
-                        &stored_tx.tx,
-                        &stored_tx.meta,
-                    ));
-                }
-
                 // Wait for the next block notification
-                if block_rx.recv().await.is_err() {
+                let Ok(block) = block_rx.recv().await else {
                     // Channel closed, this shouldn't happen in normal operation
                     tracing::warn!("block subscription closed while waiting for tx receipt");
                     return Err(EthSendRawTransactionSyncError::Timeout(timeout_duration));
+                };
+
+                if let Some(stored_tx) = block.transactions.get(&tx_hash) {
+                    return Ok(build_api_receipt(
+                        tx_hash,
+                        stored_tx.receipt.clone(),
+                        &stored_tx.tx,
+                        &stored_tx.meta,
+                    ));
                 }
             }
         })
