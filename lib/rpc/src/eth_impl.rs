@@ -1,6 +1,6 @@
 use crate::config::RpcConfig;
 use crate::eth_call_handler::EthCallHandler;
-use crate::result::{ToRpcResult, internal_rpc_err, rpc_error_with_code, unimplemented_rpc_err};
+use crate::result::{ToRpcResult, internal_rpc_err, unimplemented_rpc_err};
 use crate::rpc_storage::{ReadRpcStorage, RpcStorageError};
 use crate::tx_handler::TxHandler;
 use alloy::consensus::Account;
@@ -22,7 +22,7 @@ use alloy::serde::JsonStorageKey;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use ruint::aliases::B160;
-use std::{convert::identity, time::Duration};
+use std::convert::identity;
 use tokio::sync::watch;
 use zk_ee::common_structs::derive_flat_storage_key;
 use zk_os_api::helpers::{get_balance, get_code};
@@ -36,8 +36,7 @@ use zksync_os_storage_api::{RepositoryError, StateError, TxMeta, ViewState};
 use zksync_os_types::{L2Envelope, TransactionAcceptanceState, ZkReceiptEnvelope};
 
 pub struct EthNamespace<RpcStorage, Mempool> {
-    config: RpcConfig,
-    tx_handler: TxHandler<Mempool>,
+    tx_handler: TxHandler<RpcStorage, Mempool>,
     eth_call_handler: EthCallHandler<RpcStorage>,
 
     // todo: the idea is to only have handlers here, but then get_balance would require its own handler
@@ -59,14 +58,14 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthNamespace<RpcSto
         tx_forwarder: Option<DynProvider>,
     ) -> Self {
         let tx_handler = TxHandler::new(
+            config,
+            storage.clone(),
             mempool.clone(),
             acceptance_state,
-            config.l2_signer_blacklist.clone(),
             tx_forwarder,
         );
 
         Self {
-            config,
             tx_handler,
             eth_call_handler,
             storage,
@@ -698,64 +697,10 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> EthApiServer
         bytes: Bytes,
         max_wait_ms: Option<U256>,
     ) -> RpcResult<ZkTransactionReceipt> {
-        let timeout_duration = if let Some(timeout_ms) = max_wait_ms {
-            match timeout_ms.try_into() {
-                Ok(timeout_u64) => {
-                    let requested_timeout = Duration::from_millis(timeout_u64);
-                    if requested_timeout > self.config.send_raw_transaction_sync_max_timeout {
-                        // Per EIP-7966 MUST use default timeout if user provided timeout is invalid
-                        self.config.send_raw_transaction_sync_timeout
-                    } else {
-                        requested_timeout
-                    }
-                }
-                Err(_) => {
-                    // Per EIP-7966 MUST use default timeout if user provided timeout is invalid
-                    self.config.send_raw_transaction_sync_timeout
-                }
-            }
-        } else {
-            self.config.send_raw_transaction_sync_timeout
-        };
-
-        // Create block subscription
-        let mut block_rx = self.storage.block_subscriptions().subscribe_to_blocks();
-
-        let tx_hash = self
-            .tx_handler
-            .send_raw_transaction_impl(bytes)
+        self.tx_handler
+            .send_raw_transaction_sync_impl(bytes, max_wait_ms)
             .await
-            .to_rpc_result()?;
-
-        // Wait for the transaction to appear in a block or timeout
-        let result = tokio::time::timeout(timeout_duration, async {
-            loop {
-                // check
-                if let Ok(Some(stored_tx)) = self.storage.repository().get_stored_transaction(tx_hash) {
-                    return Ok(build_api_receipt(
-                        tx_hash,
-                        stored_tx.receipt,
-                        &stored_tx.tx,
-                        &stored_tx.meta,
-                    ));
-                }
-
-                // Wait for the next block notification
-                if block_rx.recv().await.is_err() {
-                    // Channel closed, this shouldn't happen in normal operation
-                    return Err(rpc_error_with_code(4, "The transaction was added to the mempool but the server was unable to confirm its inclusion in a block."));
-                }
-            }
-        })
-        .await;
-
-        match result {
-            Ok(receipt_result) => receipt_result,
-            Err(_) => Err(rpc_error_with_code(
-                4,
-                "The transaction was added to the mempool but wasn't processed in the allowed time.",
-            )),
-        }
+            .to_rpc_result()
     }
 
     async fn sign(&self, _address: Address, _message: Bytes) -> RpcResult<Bytes> {
