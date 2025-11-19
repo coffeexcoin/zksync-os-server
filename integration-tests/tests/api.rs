@@ -130,7 +130,7 @@ async fn send_raw_transaction_sync() -> anyhow::Result<()> {
         .to(alice)
         .value(U256::from(1))
         .nonce(0)
-        .gas_price(10_000_000)
+        .gas_price(100_000_000)
         .gas_limit(50_000);
     // Build and sign the transaction to get the envelope
     let tx_envelope = tx.build(&tester.l2_wallet).await?;
@@ -172,7 +172,7 @@ async fn send_raw_transaction_sync_timeout() -> anyhow::Result<()> {
         .value(U256::from(1))
         // !!! NOTE !!! - nonce gap
         .nonce(1)
-        .gas_price(10_000_000)
+        .gas_price(100_000_000)
         .gas_limit(50_000);
     // Build and sign the transaction to get the envelope
     let tx_envelope = tx.build(&tester.l2_wallet).await?;
