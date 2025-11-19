@@ -6,11 +6,14 @@ use alloy::primitives::{B256, Bytes, U256};
 use alloy::providers::{DynProvider, Provider};
 use alloy::transports::{RpcError, TransportErrorKind};
 use std::time::Duration;
-use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::watch;
 use zksync_os_mempool::{L2TransactionPool, PoolError};
 use zksync_os_rpc_api::types::ZkTransactionReceipt;
 use zksync_os_types::{L2Envelope, L2Transaction, NotAcceptingReason, TransactionAcceptanceState};
+
+/// Maximum user provided timeout for `eth_sendRawTransactionSync`. Chosen liberally as waiting is
+/// inexpensive.
+const SEND_RAW_TRANSACTION_SYNC_MAX_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Handles transactions received in API
 pub struct TxHandler<RpcStorage, Mempool> {
@@ -84,7 +87,7 @@ impl<RpcStorage: ReadRpcStorage, Mempool: L2TransactionPool> TxHandler<RpcStorag
             match timeout_ms.try_into() {
                 Ok(timeout_u64) => {
                     let requested_timeout = Duration::from_millis(timeout_u64);
-                    if requested_timeout > self.config.send_raw_transaction_sync_max_timeout {
+                    if requested_timeout > SEND_RAW_TRANSACTION_SYNC_MAX_TIMEOUT {
                         // Per EIP-7966 MUST use default timeout if user provided timeout is invalid
                         self.config.send_raw_transaction_sync_timeout
                     } else {

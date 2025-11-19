@@ -33,9 +33,6 @@ pub struct RpcConfig {
 
     /// Default timeout for `eth_sendRawTransactionSync`
     pub send_raw_transaction_sync_timeout: Duration,
-
-    /// Maximum user provided timeout for `eth_sendRawTransactionSync`
-    pub send_raw_transaction_sync_max_timeout: Duration,
 }
 
 impl RpcConfig {
