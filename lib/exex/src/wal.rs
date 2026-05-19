@@ -1,8 +1,10 @@
 use crate::notification::{ZkChainSegment, ZkExExNotification, ZkExecutedBlock};
+use alloy::eips::BlockNumHash;
 use alloy::primitives::B256;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -86,26 +88,25 @@ impl ZkExExWal {
         let bytes = bincode::serde::encode_to_vec(&record, bincode::config::standard())?;
         let final_path = inner.path.join(record_filename(id));
         let tmp_path = inner.path.join(format!("{}.tmp", record_filename(id)));
-        fs::write(&tmp_path, bytes)?;
+        let mut file = fs::File::create(&tmp_path)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        drop(file);
         fs::rename(tmp_path, final_path)?;
         index_live_notification(&mut inner.live_committed_by_hash, notification);
         Ok(())
     }
 
-    pub fn notifications_after(
+    pub fn notifications_after_head(
         &self,
-        head_number: u64,
+        head: BlockNumHash,
     ) -> Result<Vec<ZkExExNotification>, ZkExExWalError> {
         let inner = self.inner.lock().map_err(|_| ZkExExWalError::Poisoned)?;
         let notifications = read_records(&inner.path)?
             .into_iter()
             .map(|record| record.notification)
-            .filter(|notification| {
-                notification
-                    .max_block_number()
-                    .is_some_and(|n| n > head_number)
-            })
             .map(WalNotification::into_notification)
+            .filter(|notification| !notification.is_at_or_below(head))
             .collect();
         Ok(notifications)
     }
@@ -246,15 +247,17 @@ impl WalBlock {
 }
 
 fn read_records(path: &Path) -> Result<Vec<WalRecord>, ZkExExWalError> {
-    let mut entries = fs::read_dir(path)?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "bin")
-        })
-        .collect::<Vec<_>>();
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|extension| extension == "bin")
+        {
+            entries.push(entry);
+        }
+    }
     entries.sort_by_key(|entry| entry.file_name());
 
     let mut records = Vec::with_capacity(entries.len());
@@ -290,6 +293,10 @@ mod tests {
         ZkExecutedBlock::header_only(number, B256::with_last_byte(number as u8))
     }
 
+    fn block_with_hash(number: u64, hash_last_byte: u8) -> ZkExecutedBlock {
+        ZkExecutedBlock::header_only(number, B256::with_last_byte(hash_last_byte))
+    }
+
     fn committed(number: u64) -> ZkExExNotification {
         ZkExExNotification::ChainCommitted {
             new: ZkChainSegment::single(block(number)),
@@ -304,7 +311,9 @@ mod tests {
         wal.commit(&committed(2)).unwrap();
 
         let reopened = ZkExExWal::open(temp.path()).unwrap();
-        let notifications = reopened.notifications_after(1).unwrap();
+        let notifications = reopened
+            .notifications_after_head(BlockNumHash::new(1, B256::with_last_byte(1)))
+            .unwrap();
 
         assert_eq!(notifications.len(), 1);
         let ZkExExNotification::ChainCommitted { new } = &notifications[0] else {
@@ -386,12 +395,39 @@ mod tests {
 
         let notifications = ZkExExWal::open(temp.path())
             .unwrap()
-            .notifications_after(0)
+            .notifications_after_head(BlockNumHash::new(0, B256::ZERO))
             .unwrap();
         let ZkExExNotification::ChainReorged { old, new } = &notifications[0] else {
             panic!("expected ChainReorged");
         };
         assert_eq!(old.tip().unwrap().number(), 2);
         assert_eq!(new.tip().unwrap().number(), 3);
+    }
+
+    #[test]
+    fn replays_same_height_reorg_when_head_hash_differs() {
+        let temp = tempfile::tempdir().unwrap();
+        let wal = ZkExExWal::open(temp.path()).unwrap();
+        wal.commit(&ZkExExNotification::ChainCommitted {
+            new: ZkChainSegment::single(block_with_hash(5, 5)),
+        })
+        .unwrap();
+        wal.commit(&ZkExExNotification::ChainReorged {
+            old: ZkChainSegment::single(block_with_hash(5, 5)),
+            new: ZkChainSegment::single(block_with_hash(5, 6)),
+        })
+        .unwrap();
+
+        let notifications = ZkExExWal::open(temp.path())
+            .unwrap()
+            .notifications_after_head(BlockNumHash::new(5, B256::with_last_byte(5)))
+            .unwrap();
+
+        assert_eq!(notifications.len(), 1);
+        let ZkExExNotification::ChainReorged { old, new } = &notifications[0] else {
+            panic!("expected ChainReorged");
+        };
+        assert_eq!(old.tip().unwrap().hash(), B256::with_last_byte(5));
+        assert_eq!(new.tip().unwrap().hash(), B256::with_last_byte(6));
     }
 }

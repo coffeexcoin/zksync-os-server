@@ -194,6 +194,10 @@ pub async fn run_with_exexes<
 
     let node_role = config.general_config.node_role;
     let role: &'static str = node_role.as_str();
+    assert!(
+        exexes.is_empty() || node_role.is_external(),
+        "ZKsync ExEx is currently supported only on External Nodes"
+    );
 
     // Priority tree is required for main node
     if node_role.is_main() && !config.general_config.run_priority_tree {
@@ -1620,10 +1624,7 @@ where
     if exexes.is_empty() {
         return None;
     }
-    assert!(
-        config.general_config.node_role.is_external(),
-        "ZKsync ExEx is currently supported only on External Nodes"
-    );
+    debug_assert!(config.general_config.node_role.is_external());
 
     let node_head = latest_repository_block_num_hash(&repositories);
     let wal = ZkExExWal::open(config.general_config.rocks_db_path.join(EXEX_WAL_DB_NAME))

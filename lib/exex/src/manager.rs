@@ -98,7 +98,7 @@ impl ZkExExManager {
         let mut registrations = Vec::with_capacity(exexes.len());
         for config in exexes {
             let head = config.head.unwrap_or(node_head);
-            let backfill = wal.notifications_after(head.number)?;
+            let backfill = wal.notifications_after_head(head)?;
             let (notification_sender, notification_receiver) = mpsc::channel(1);
             managed.push(ManagedZkExEx {
                 id: config.id.clone(),
