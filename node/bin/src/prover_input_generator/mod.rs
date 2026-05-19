@@ -68,6 +68,7 @@ impl<ReadState: ReadStateHistory + Clone + Send + 'static> PipelineComponent
                     output: block_output,
                     record: replay_record,
                     tree,
+                    replaced_block_hash: _,
                 }) = input.recv_and_record_picked(&state_reporter).await
                 else {
                     return Ok(());
@@ -149,6 +150,7 @@ impl<ReadState: ReadStateHistory + Clone + Send + 'static> ProverInputGenerator<
             output: block_output,
             record: replay_record,
             tree,
+            replaced_block_hash: _,
         } = input;
         let (result_tx, result_rx) = oneshot::channel();
         let read_state = self.read_state.clone();

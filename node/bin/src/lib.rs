@@ -42,8 +42,9 @@ use crate::provider::{ProviderKind, build_node_provider};
 use crate::state_initializer::StateInitializer;
 use crate::tree_manager::TreeManager;
 use alloy::consensus::BlobTransactionSidecar;
+use alloy::eips::BlockNumHash;
 use alloy::network::{Ethereum, EthereumWallet};
-use alloy::primitives::BlockNumber;
+use alloy::primitives::{B256, BlockNumber};
 use alloy::providers::fillers::{FillProvider, TxFiller};
 use alloy::providers::{Provider, ProviderBuilder, WalletProvider};
 use anyhow::Context;
@@ -64,6 +65,10 @@ use zksync_os_batch_verification::{
 };
 use zksync_os_contract_interface::l1_discovery::{BatchVerificationSL, L1State};
 use zksync_os_contract_interface::models::BatchDaInputMode;
+use zksync_os_exex::{
+    BoxedLaunchZkExEx, ExExPipelineNotifier, LaunchZkExEx, ZkExExConfig, ZkExExContext,
+    ZkExExManager, ZkExExManagerHandle, ZkExExWal,
+};
 use zksync_os_gas_adjuster::GasAdjuster;
 use zksync_os_genesis::{FileGenesisInputSource, Genesis, GenesisInputSource};
 use zksync_os_interface::types::BlockHashes;
@@ -133,12 +138,57 @@ const STATE_TREE_DB_NAME: &str = "tree";
 const PRIORITY_TREE_DB_NAME: &str = "priority_txs_tree";
 const REPOSITORY_DB_NAME: &str = "repository";
 const BATCH_DB_NAME: &str = "batch";
+const EXEX_WAL_DB_NAME: &str = "exex_wal";
 pub const INTERNAL_CONFIG_FILE_NAME: &str = "internal_config.json";
 
+pub type ServerZkExExContext<State> =
+    ZkExExContext<RepositoryManager, BlockReplayStorage, Finality, State>;
+pub type ServerZkExEx<State> = InstalledZkExEx<ServerZkExExContext<State>>;
+
+pub struct InstalledZkExEx<Ctx> {
+    pub id: String,
+    pub head: Option<BlockNumHash>,
+    pub launcher: Box<dyn BoxedLaunchZkExEx<Ctx>>,
+}
+
+impl<Ctx> InstalledZkExEx<Ctx>
+where
+    Ctx: Send + 'static,
+{
+    pub fn new<L>(id: impl Into<String>, head: Option<BlockNumHash>, launcher: L) -> Self
+    where
+        L: LaunchZkExEx<Ctx>,
+    {
+        Self {
+            id: id.into(),
+            head,
+            launcher: Box::new(launcher),
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone>(
+pub async fn run<
+    State: ReadStateHistory + WriteState + StateInitializer + Clone + Send + 'static,
+>(
     runtime: &Runtime,
     config: Config,
+) {
+    run_with_exexes::<State>(
+        runtime,
+        config,
+        Vec::<InstalledZkExEx<ServerZkExExContext<State>>>::new(),
+    )
+    .await;
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_with_exexes<
+    State: ReadStateHistory + WriteState + StateInitializer + Clone + Send + 'static,
+>(
+    runtime: &Runtime,
+    config: Config,
+    exexes: Vec<ServerZkExEx<State>>,
 ) {
     report_static_config_metrics(&config);
 
@@ -912,6 +962,17 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
         state.clone(),
         tree_for_rpc,
     );
+    let exex_manager_handle = launch_exexes(
+        runtime,
+        &config,
+        repositories.clone(),
+        block_replay_storage.clone(),
+        finality_storage.clone(),
+        state.clone(),
+        exexes,
+    )
+    .await;
+
     runtime.spawn_critical_task(
         "l1 batch persist watcher",
         L1PersistBatchWatcher::create_watcher(
@@ -1073,6 +1134,7 @@ pub async fn run<State: ReadStateHistory + WriteState + StateInitializer + Clone
             chain_id,
             verify_batch_rx,
             outgoing_verify_results.clone(),
+            exex_manager_handle,
         )
         .await
     };
@@ -1440,6 +1502,7 @@ async fn run_en_pipeline(
     chain_id: u64,
     verify_batch_rx: tokio::sync::mpsc::Receiver<PeerVerifyBatch>,
     outgoing_verify_results: tokio::sync::broadcast::Sender<PeerVerifyBatchResult>,
+    exex_manager_handle: Option<ZkExExManagerHandle>,
 ) -> watch::Receiver<TransactionAcceptanceState> {
     let internal_config_manager = init_and_report_internal_config_manager(
         config
@@ -1487,6 +1550,7 @@ async fn run_en_pipeline(
                 }),
         )
         .pipe(TreeManager { tree: tree.clone() })
+        .pipe_opt(exex_manager_handle.map(ExExPipelineNotifier::new))
         .pipe_if(
             config.batch_verification_config.client_enabled,
             BatchVerificationResponder::new(
@@ -1539,6 +1603,80 @@ async fn run_en_pipeline(
         clear_failing_block_config_task(finality, internal_config_manager),
     );
     monitor.spawn(runtime, snapshot_rx)
+}
+
+async fn launch_exexes<State>(
+    runtime: &Runtime,
+    config: &Config,
+    repositories: RepositoryManager,
+    block_replay_storage: BlockReplayStorage,
+    finality_storage: Finality,
+    state: State,
+    exexes: Vec<ServerZkExEx<State>>,
+) -> Option<ZkExExManagerHandle>
+where
+    State: ReadStateHistory + WriteState + StateInitializer + Clone + Send + 'static,
+{
+    if exexes.is_empty() {
+        return None;
+    }
+    assert!(
+        config.general_config.node_role.is_external(),
+        "ZKsync ExEx is currently supported only on External Nodes"
+    );
+
+    let node_head = latest_repository_block_num_hash(&repositories);
+    let wal = ZkExExWal::open(config.general_config.rocks_db_path.join(EXEX_WAL_DB_NAME))
+        .expect("failed to initialize ZKsync ExEx WAL");
+    let exex_configs = exexes
+        .iter()
+        .map(|exex| ZkExExConfig::new(exex.id.clone(), exex.head))
+        .collect();
+    let (manager, handle, registrations) =
+        ZkExExManager::new(node_head, wal, finality_storage.subscribe(), exex_configs)
+            .expect("failed to initialize ZKsync ExEx manager");
+
+    runtime.spawn_critical_task("zk exex manager", async move {
+        manager.run().await.expect("ZKsync ExEx manager failed");
+    });
+
+    for (installed, registration) in exexes.into_iter().zip(registrations) {
+        assert_eq!(
+            installed.id, registration.id,
+            "ExEx manager registration order changed unexpectedly"
+        );
+        let id = installed.id;
+        let ctx = ZkExExContext {
+            head: registration.head,
+            runtime: runtime.clone(),
+            events: registration.events,
+            notifications: registration.notifications,
+            repository: repositories.clone(),
+            replay: block_replay_storage.clone(),
+            finality: finality_storage.clone(),
+            state: state.clone(),
+        };
+        runtime.spawn_critical_task("zk exex", async move {
+            let exex = installed
+                .launcher
+                .launch(ctx)
+                .await
+                .unwrap_or_else(|err| panic!("failed to launch ZKsync ExEx `{id}`: {err:#}"));
+            exex.await
+                .unwrap_or_else(|err| panic!("ZKsync ExEx `{id}` failed: {err:#}"));
+        });
+    }
+
+    Some(handle)
+}
+
+fn latest_repository_block_num_hash(repositories: &impl ReadRepository) -> BlockNumHash {
+    let block_number = repositories.get_latest_block();
+    let block = repositories
+        .get_block_by_number(block_number)
+        .expect("failed to read latest repository block")
+        .expect("latest repository block is missing");
+    BlockNumHash::new(block_number, B256::from_slice(block.hash().as_slice()))
 }
 
 fn block_hashes_for_first_block(repositories: &dyn ReadRepository) -> BlockHashes {

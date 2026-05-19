@@ -121,6 +121,7 @@ pub struct TreeBlock {
     pub output: BlockOutput,
     pub record: ReplayRecord,
     pub tree: BlockMerkleTreeData,
+    pub replaced_block_hash: Option<B256>,
 }
 
 impl HasBlockRangeEnd for TreeBlock {

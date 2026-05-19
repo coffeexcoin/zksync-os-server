@@ -2,6 +2,7 @@ use crate::config::SequencerConfig;
 use crate::execution::metrics::BlockApplierState;
 use crate::model::blocks::{AppliedBlock, BlockCommandType, BlockPayload};
 use alloy::consensus::Sealed;
+use alloy::primitives::B256;
 use async_trait::async_trait;
 use tokio::sync::{mpsc, watch};
 use zksync_os_observability::ComponentStateReporter;
@@ -58,10 +59,21 @@ where
 
             let block_number = executed_replay.block_context.block_number;
             let block_hash = block_output.header.hash();
+            let new_block_hash = B256::from_slice(block_hash.as_slice());
             let override_allowed = match cmd_type {
                 BlockCommandType::Rebuild => true,
                 _ if self.config.node_role.is_external() => true,
                 _ => false,
+            };
+            let replaced_block_hash = if override_allowed {
+                self.repositories
+                    .get_block_by_number(block_number)?
+                    .and_then(|existing_block| {
+                        let existing_hash = B256::from_slice(existing_block.hash().as_slice());
+                        (existing_hash != new_block_hash).then_some(existing_hash)
+                    })
+            } else {
+                None
             };
 
             state_reporter.enter_state(BlockApplierState::AddingToStorage);
@@ -103,6 +115,7 @@ where
                 AppliedBlock {
                     output: block_output_with_reads,
                     record: executed_replay,
+                    replaced_block_hash,
                 },
                 &state_reporter,
             )?;

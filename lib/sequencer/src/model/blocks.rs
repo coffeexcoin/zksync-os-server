@@ -98,6 +98,7 @@ impl HasBlockRangeEnd for BlockPayload {
 pub struct AppliedBlock {
     pub output: BlockOutputWithReads,
     pub record: ReplayRecord,
+    pub replaced_block_hash: Option<B256>,
 }
 
 impl HasBlockRangeEnd for AppliedBlock {

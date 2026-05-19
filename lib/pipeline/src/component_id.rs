@@ -29,6 +29,7 @@ pub enum ComponentId {
     RevmConsistencyChecker,
     MigrationGate,
     ReplayArchiveGate,
+    ExExPipelineNotifier,
 }
 
 impl ComponentId {
@@ -59,6 +60,7 @@ impl ComponentId {
             Self::RevmConsistencyChecker => "revm_consistency_checker",
             Self::MigrationGate => "migration_gate",
             Self::ReplayArchiveGate => "replay_archive_gate",
+            Self::ExExPipelineNotifier => "exex_pipeline_notifier",
         }
     }
 }

@@ -15187,6 +15187,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7e143e8ed5c5b99fece20b77ebef0f0314a349b74c9a788b823e170a68df1de"
 
 [[package]]
+name = "zksync_os_exex"
+version = "0.20.3"
+dependencies = [
+ "alloy 2.0.4",
+ "anyhow",
+ "async-trait",
+ "bincode 2.0.1",
+ "futures",
+ "reth-tasks",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "zksync_os_batch_types",
+ "zksync_os_interface",
+ "zksync_os_observability",
+ "zksync_os_pipeline",
+ "zksync_os_storage_api",
+]
+
+[[package]]
 name = "zksync_os_external_price_api"
 version = "0.20.3"
 dependencies = [
@@ -15938,6 +15960,7 @@ dependencies = [
  "zksync_os_batcher_metrics",
  "zksync_os_config_validation_macros",
  "zksync_os_contract_interface",
+ "zksync_os_exex",
  "zksync_os_external_price_api",
  "zksync_os_gas_adjuster",
  "zksync_os_genesis",

@@ -119,6 +119,7 @@ where
             let Some(AppliedBlock {
                 output: block,
                 record: replay_record,
+                replaced_block_hash,
             }) = input.recv_and_record_picked(&state_reporter).await
             else {
                 tracing::info!("inbound channel closed");
@@ -269,6 +270,7 @@ where
                 AppliedBlock {
                     output: block,
                     record: replay_record,
+                    replaced_block_hash,
                 },
                 &state_reporter,
             )?;

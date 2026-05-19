@@ -1,0 +1,31 @@
+[package]
+name = "zksync_os_exex"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+zksync_os_batch_types.workspace = true
+zksync_os_interface.workspace = true
+zksync_os_observability.workspace = true
+zksync_os_pipeline.workspace = true
+zksync_os_storage_api.workspace = true
+
+alloy = { workspace = true, default-features = false, features = ["eips", "serde"] }
+anyhow.workspace = true
+async-trait.workspace = true
+bincode.workspace = true
+futures.workspace = true
+reth-tasks.workspace = true
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "macros", "rt", "sync", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

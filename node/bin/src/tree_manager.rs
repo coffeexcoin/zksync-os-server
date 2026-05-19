@@ -253,6 +253,7 @@ impl TreeManager {
             output: block_output,
             record: block.record,
             tree: tree_data,
+            replaced_block_hash: block.replaced_block_hash,
         })
     }
 }
