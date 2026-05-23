@@ -15,9 +15,14 @@ pub mod prover_api;
 mod prover_block;
 mod prover_input_generator;
 mod provider;
+mod server_builder;
 mod state_initializer;
 pub mod tree_manager;
 pub mod util;
+
+pub use server_builder::{
+    InstalledZkExEx, ServerBuilder, ServerZkExEx, ServerZkExExContext, builder,
+};
 
 use crate::batch_sink::{BatchSink, NoOpSink, clear_failing_block_config_task};
 use crate::batcher::{Batcher, BatcherStartupConfig, util::load_genesis_stored_batch_info};
@@ -66,8 +71,8 @@ use zksync_os_batch_verification::{
 use zksync_os_contract_interface::l1_discovery::{BatchVerificationSL, L1State};
 use zksync_os_contract_interface::models::BatchDaInputMode;
 use zksync_os_exex::{
-    BoxedLaunchZkExEx, ExExPipelineNotifier, LaunchZkExEx, ZkExExConfig, ZkExExContext,
-    ZkExExManager, ZkExExManagerHandle, ZkExExWal,
+    ExExPipelineNotifier, ZkExExConfig, ZkExExContext, ZkExExManager, ZkExExManagerHandle,
+    ZkExExWal,
 };
 use zksync_os_gas_adjuster::GasAdjuster;
 use zksync_os_genesis::{FileGenesisInputSource, Genesis, GenesisInputSource};
@@ -141,32 +146,6 @@ const BATCH_DB_NAME: &str = "batch";
 const EXEX_WAL_DB_NAME: &str = "exex_wal";
 pub const INTERNAL_CONFIG_FILE_NAME: &str = "internal_config.json";
 
-pub type ServerZkExExContext<State> =
-    ZkExExContext<RepositoryManager, BlockReplayStorage, Finality, State>;
-pub type ServerZkExEx<State> = InstalledZkExEx<ServerZkExExContext<State>>;
-
-pub struct InstalledZkExEx<Ctx> {
-    pub id: String,
-    pub head: Option<BlockNumHash>,
-    pub launcher: Box<dyn BoxedLaunchZkExEx<Ctx>>,
-}
-
-impl<Ctx> InstalledZkExEx<Ctx>
-where
-    Ctx: Send + 'static,
-{
-    pub fn new<L>(id: impl Into<String>, head: Option<BlockNumHash>, launcher: L) -> Self
-    where
-        L: LaunchZkExEx<Ctx>,
-    {
-        Self {
-            id: id.into(),
-            head,
-            launcher: Box::new(launcher),
-        }
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn run<
     State: ReadStateHistory + WriteState + StateInitializer + Clone + Send + 'static,
@@ -174,12 +153,7 @@ pub async fn run<
     runtime: &Runtime,
     config: Config,
 ) {
-    run_with_exexes::<State>(
-        runtime,
-        config,
-        Vec::<InstalledZkExEx<ServerZkExExContext<State>>>::new(),
-    )
-    .await;
+    builder::<State>(runtime, config).launch().await;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -191,6 +165,7 @@ pub async fn run_with_exexes<
     exexes: Vec<ServerZkExEx<State>>,
 ) {
     report_static_config_metrics(&config);
+    server_builder::ensure_unique_exex_ids(&exexes);
 
     let node_role = config.general_config.node_role;
     let role: &'static str = node_role.as_str();
